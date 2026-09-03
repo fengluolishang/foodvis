@@ -10,7 +10,7 @@ from flask_cors import CORS
 from openai import OpenAI
 
 
-# 1. 基础设置
+# 基础设置
 
 load_dotenv()
 
@@ -31,7 +31,7 @@ CACHED_DF = None
 AI_DATA_MEMORY = ""
 
 
-# 2. 数据字段设置
+# 数据字段设置
 
 DIET_ORDER = [
     "High meat", "Medium meat", "Low meat",
@@ -84,7 +84,7 @@ SCATTER_EXPORT_FIELDS = {
 }
 
 
-# 3. 工具函数
+# 一些工具函数
 
 def clean_column_name(name):
     return str(name).strip().lower().replace(" ", "_").replace("-", "_")
@@ -143,7 +143,7 @@ def extract_json_from_text(text):
     }
 
 
-# 4. 读取 CSV
+# 读取 CSV 数据
 
 def load_data():
     if not DATA_PATH.exists():
@@ -187,7 +187,7 @@ def load_data():
         if col not in df.columns:
             df[col] = "Unknown"
 
-    # 映射饮食名称
+    # 把原始数据里的饮食名称统一成 dashboard 使用的名称
     new_diet_names = []
     for i in range(len(df)):
         old_name = df.iloc[i]["diet_group"]
@@ -208,7 +208,7 @@ def get_cached_df():
     return CACHED_DF
 
 
-# 5. 计算图表数据
+# 计算图表需要的数据
 
 def compute_bar_data(df, selected_indicator):
     field = IMPACT_FIELDS.get(selected_indicator, "mean_ghgs")
@@ -232,7 +232,7 @@ def compute_bar_data(df, selected_indicator):
         }
         result.append(row)
 
-    # 排序，把 None 放最后
+    # 让数值高的饮食排在前面，没有数值的放最后
     def get_sort_value(item):
         v = item["selected_impact_value"]
         if v is None:
@@ -244,10 +244,7 @@ def compute_bar_data(df, selected_indicator):
 
 
 def compute_radar_data(df):
-    """
-    Radar chart 数据。
-    优先读取 Tableau 导出的 radar_data.csv。
-    """
+    # 先用 Tableau 导出的数据，因为这样和 dashboard 上的雷达图保持一致
     if RADAR_DATA_PATH.exists():
         radar_df = pd.read_csv(RADAR_DATA_PATH)
 
@@ -267,14 +264,14 @@ def compute_radar_data(df):
                 "radar_data.csv is missing columns: " + ", ".join(missing_cols)
             )
 
-        # 映射饮食名称
+        # 把这里的饮食名称统一成 dashboard 使用的名称
         new_diet_list = []
         for i in range(len(radar_df)):
             old_name = radar_df.iloc[i]["diet_group"]
             new_diet_list.append(map_diet_name(old_name))
         radar_df["diet_group"] = new_diet_list
 
-        # 映射指标名称
+        # 把 Tableau 字段名换成 dashboard 上显示的指标名称
         new_indicator_list = []
         for i in range(len(radar_df)):
             old_ind = radar_df.iloc[i]["indicator"]
@@ -298,7 +295,7 @@ def compute_radar_data(df):
             .reset_index()
         )
 
-        # 排序用
+        # 给饮食组和其他分类一个固定顺序，显示时不会乱
         diet_order_list = []
         for i in range(len(grouped)):
             dg = grouped.iloc[i]["diet_group"]
@@ -331,7 +328,7 @@ def compute_radar_data(df):
 
         return result
 
-    # 如果没有 Tableau 导出文件，就从原始 CSV 计算
+    # 如果没有对应的 Tableau 导出文件，就直接从原始 CSV 计算
     raw_values = {}
     for diet in DIET_ORDER:
         subset = df[df["diet_group"] == diet]
@@ -379,10 +376,7 @@ def compute_radar_data(df):
 
 
 def compute_treemap_data(df):
-    """
-    Treemap 数据。
-    优先读取 Tableau 导出的 treemap_data.csv。
-    """
+    # 如果有 Tableau 导出的 treemap 数据就先使用它
     if TREEMAP_DATA_PATH.exists():
         treemap_df = pd.read_csv(TREEMAP_DATA_PATH)
 
@@ -408,7 +402,7 @@ def compute_treemap_data(df):
                 "treemap_data.csv is missing columns: " + ", ".join(missing_cols)
             )
 
-        # 映射饮食名称
+        # 把这里的饮食名称统一成 dashboard 使用的名称
         new_diet_list = []
         for i in range(len(treemap_df)):
             old_name = treemap_df.iloc[i]["diet_group"]
@@ -429,7 +423,7 @@ def compute_treemap_data(df):
             .reset_index()
         )
 
-        # 排序用
+        # 给饮食组和其他分类一个固定顺序，显示时不会乱
         diet_order_list = []
         for i in range(len(grouped)):
             dg = grouped.iloc[i]["diet_group"]
@@ -464,7 +458,7 @@ def compute_treemap_data(df):
 
         return result
 
-    # 备用计算
+    # 如果没有 treemap_data.csv，就从原始数据自己计算
     long_rows = []
     for indicator, field in IMPACT_FIELDS.items():
         if field not in df.columns:
@@ -488,7 +482,7 @@ def compute_treemap_data(df):
 
     long_df = pd.DataFrame(long_rows)
 
-    # 全局 min-max
+    # 把不同环境指标的数值转成 0 到 1，方便 treemap 比较
     min_val = long_df["average_value"].min()
     max_val = long_df["average_value"].max()
 
@@ -502,7 +496,7 @@ def compute_treemap_data(df):
 
     long_df["normalized_impact"] = norm_values
 
-    # 排序
+    # 按饮食组和年龄组的正常顺序整理结果
     diet_order_list = []
     for i in range(len(long_df)):
         dg = long_df.iloc[i]["diet_group"]
@@ -538,10 +532,7 @@ def compute_treemap_data(df):
 
 
 def compute_scatter_matrix_data(df):
-    """
-    Scatterplot matrix 数据。
-    优先读取 Tableau 导出的 scatter_matrix_data.csv。
-    """
+    # scatter matrix 也优先使用 Tableau 导出的结果
     if SCATTER_DATA_PATH.exists():
         scatter_df = pd.read_csv(SCATTER_DATA_PATH)
 
@@ -561,7 +552,7 @@ def compute_scatter_matrix_data(df):
                 "scatter_matrix_data.csv is missing columns: " + ", ".join(missing_cols)
             )
 
-        # 映射饮食名称
+        # 把这里的饮食名称统一成 dashboard 使用的名称
         new_diet_list = []
         for i in range(len(scatter_df)):
             old_name = scatter_df.iloc[i]["diet_group"]
@@ -578,7 +569,7 @@ def compute_scatter_matrix_data(df):
             .reset_index()
         )
 
-        # 排序
+        # 按饮食组和年龄组的正常顺序整理结果
         diet_order_list = []
         for i in range(len(grouped)):
             dg = grouped.iloc[i]["diet_group"]
@@ -613,7 +604,7 @@ def compute_scatter_matrix_data(df):
 
         return result
 
-    # 如果没有 Tableau 导出文件，就从原始 CSV 计算
+    # 如果没有对应的 Tableau 导出文件，就直接从原始 CSV 计算
     fields = []
     for f in IMPACT_FIELDS.values():
         if f in df.columns:
@@ -624,7 +615,7 @@ def compute_scatter_matrix_data(df):
 
     grouped = df.groupby(["diet_group", "age_group", "sex"], dropna=False)[fields].mean().reset_index()
 
-    # 排序
+    # 按饮食组和年龄组的正常顺序整理结果
     diet_order_list = []
     for i in range(len(grouped)):
         dg = grouped.iloc[i]["diet_group"]
@@ -661,10 +652,10 @@ def compute_scatter_matrix_data(df):
     return result
 
 
-# 6. Dashboard context 和 AI memory
+# Dashboard context 和 AI memory
 
 def _round_df(df, cols, digits=3):
-    """Round specified columns in a DataFrame."""
+    # 把摘要里的数字统一保留相同的小数位
     for c in cols:
         if c in df.columns:
             new_vals = []
@@ -680,7 +671,7 @@ def build_dashboard_context(df, selected_indicator):
     treemap_data = compute_treemap_data(df)
     scatter_data = compute_scatter_matrix_data(df)
 
-    # ---------- Treemap 摘要 ----------
+    # Treemap 的摘要
     treemap_df = pd.DataFrame(treemap_data)
     treemap_top = []
     treemap_by_diet = []
@@ -709,7 +700,7 @@ def build_dashboard_context(df, selected_indicator):
         for i in range(len(tc)):
             treemap_by_category.append(tc.iloc[i].to_dict())
 
-    # ---------- Radar 摘要 ----------
+    # Radar chart 的摘要
     radar_df = pd.DataFrame(radar_data)
     radar_by_diet = []
     radar_by_indicator = []
@@ -729,7 +720,7 @@ def build_dashboard_context(df, selected_indicator):
         for i in range(len(radar_grouped)):
             radar_by_indicator.append(radar_grouped.iloc[i].to_dict())
 
-    # ---------- Scatter matrix 摘要 ----------
+    # Scatter matrix 的摘要
     scatter_df = pd.DataFrame(scatter_data)
     scatter_correlation_examples = []
 
@@ -754,7 +745,7 @@ def build_dashboard_context(df, selected_indicator):
                         "correlation": round_number(corr_val, 3)
                     })
 
-        # 按绝对值排序
+        # 相关系数绝对值越大，就越值得放到摘要里
         def abs_sort_key(x):
             if x["correlation"] is None:
                 return -1
@@ -763,7 +754,7 @@ def build_dashboard_context(df, selected_indicator):
         corr_rows.sort(key=abs_sort_key, reverse=True)
         scatter_correlation_examples = corr_rows[:15]
 
-    # 构建 dataset_summary
+    # 这些基本信息会一起发给 AI，帮助它理解整个数据集
     sex_values = df["sex"].dropna().unique().tolist()
     sex_str_list = []
     for s in sex_values:
@@ -839,7 +830,7 @@ def initialise_ai_data_memory():
 
     dashboard_context = build_dashboard_context(CACHED_DF, selected_indicator="GHG Emissions")
 
-    # 如果没有 API Key，使用本地记忆
+    # 没有 API Key 时也保留一段简单的数据说明
     if not os.getenv("OPENAI_API_KEY"):
         AI_DATA_MEMORY = (
             "The dataset is about food choice and environmental impact. "
@@ -894,12 +885,10 @@ def initialise_ai_data_memory():
         print(str(error))
 
 
-# 7. 问题识别
+# 判断用户的问题类型
 
 def detect_request_mode(question):
-    """
-    只有明确提到 generate / 生成 / 生成图 时才生图。
-    """
+    # 只有用户明确说 generate / 生成时才进入生图模式
     q = (question or "").lower().strip()
 
     generate_keywords = ["generate", "生成", "生成图"]
@@ -967,7 +956,7 @@ def detect_question_focus(question):
     return "general"
 
 
-# 8. 普通问答 prompt
+# 普通问答的 prompt
 
 def build_text_answer_prompt(question, dashboard_context):
     question_focus = detect_question_focus(question)
@@ -1003,7 +992,7 @@ def build_text_answer_prompt(question, dashboard_context):
     return prompt
 
 
-# 9. AI 生图数据和规则
+# AI 生图需要的数据和规则
 
 def prepare_chart_data_for_image(df, mode, selected_indicator):
     if mode == "image_bar":
@@ -1017,7 +1006,7 @@ def prepare_chart_data_for_image(df, mode, selected_indicator):
 
     if mode == "image_treemap":
         all_rows = compute_treemap_data(df)
-        # 排序取前 30
+        # 只取 normalized impact 最高的 30 条，避免图片 prompt 太长
         def treemap_sort_key(x):
             val = x["normalized_impact"]
             if val is not None:
@@ -1123,7 +1112,7 @@ def generate_chart_image(image_prompt):
     raise RuntimeError("No base64 image was returned by the image model.")
 
 
-# 10. Flask 路由
+# Flask 路由
 
 @app.route("/")
 def index():
@@ -1199,7 +1188,7 @@ def ask_ai():
         else:
             mode = "text"
 
-        # ---------- 普通文字 / 截图问答 ----------
+        # 普通文字问答，也可以同时带一张 dashboard 截图
         if mode == "text":
             dashboard_context = build_dashboard_context(df, selected_indicator)
 
@@ -1245,7 +1234,7 @@ def ask_ai():
                 "image_base64": ""
             })
 
-        # ---------- AI 生图 ----------
+        # 用户明确要求生成图时才进入这里
         chart_data = prepare_chart_data_for_image(df, mode, selected_indicator)
         prompt_info = build_chart_prompt_with_llm(mode, chart_data)
         image_prompt = prompt_info.get("image_prompt", "")
@@ -1266,8 +1255,9 @@ def ask_ai():
         return jsonify({"error": "AI request failed.", "detail": str(error)}), 500
 
 
-# 11. 启动 Flask
+# 启动 Flask
 
 if __name__ == "__main__":
     initialise_ai_data_memory()
     app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
+
