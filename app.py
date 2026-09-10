@@ -888,7 +888,8 @@ def initialise_ai_data_memory():
 # 判断用户的问题类型
 
 def detect_request_mode(question):
-    # 只有用户明确说 generate / 生成时才进入生图模式
+    # 只有用户明确要求生成柱状图时，才进入生图模式
+    # 其他图表（雷达图、treemap、scatterplot matrix）只保留解释功能，不再生成图片
     q = (question or "").lower().strip()
 
     generate_keywords = ["generate", "生成", "生成图"]
@@ -906,22 +907,8 @@ def detect_request_mode(question):
         if keyword in q:
             return "image_bar"
 
-    treemap_keywords = ["treemap", "tree map", "树图", "矩形树图"]
-    for keyword in treemap_keywords:
-        if keyword in q:
-            return "image_treemap"
-
-    radar_keywords = ["radar chart", "radar", "雷达图"]
-    for keyword in radar_keywords:
-        if keyword in q:
-            return "image_radar"
-
-    scatter_keywords = ["scatterplot matrix", "scatter plot matrix", "scatter matrix", "散点矩阵"]
-    for keyword in scatter_keywords:
-        if keyword in q:
-            return "image_scatter"
-
-    return "image_summary"
+    # 非柱状图的生成请求不进入图片生成模式
+    return "text"
 
 
 def detect_question_focus(question):
@@ -995,6 +982,7 @@ def build_text_answer_prompt(question, dashboard_context):
 # AI 生图需要的数据和规则
 
 def prepare_chart_data_for_image(df, mode, selected_indicator):
+    # 现在只保留柱状图生成功能
     if mode == "image_bar":
         return {
             "chart_type": "bar chart",
@@ -1002,62 +990,6 @@ def prepare_chart_data_for_image(df, mode, selected_indicator):
             "selected_indicator": selected_indicator,
             "basic_rule": "Diet Group is the category. selected_impact_value is the bar length.",
             "data": compute_bar_data(df, selected_indicator)
-        }
-
-    if mode == "image_treemap":
-        all_rows = compute_treemap_data(df)
-        # 只取 normalized impact 最高的 30 条，避免图片 prompt 太长
-        def treemap_sort_key(x):
-            val = x["normalized_impact"]
-            if val is not None:
-                return val
-            return -1
-
-        sorted_rows = sorted(all_rows, key=treemap_sort_key, reverse=True)
-        return {
-            "chart_type": "treemap",
-            "data_meaning": "Environmental impact by diet group, age group, and impact category",
-            "hierarchy": "Diet Group -> Age Group -> Impact Category",
-            "basic_rule": "Rectangle size and colour both represent normalized_impact.",
-            "data": sorted_rows[:30]
-        }
-
-    if mode == "image_radar":
-        return {
-            "chart_type": "radar chart",
-            "data_meaning": "Relative environmental impact of each diet group across nine indicators",
-            "axes": ALL_INDICATORS,
-            "basic_rule": "Each axis is one environmental indicator. relative_impact is the radius. Each diet group is one polygon.",
-            "data": compute_radar_data(df)
-        }
-
-    if mode == "image_scatter":
-        return {
-            "chart_type": "scatterplot matrix",
-            "data_meaning": "Relationships between environmental impact indicators",
-            "variables": ALL_INDICATORS,
-            "basic_rule": "Each small panel compares two indicators. Each point is Diet Group + Age Group + Sex.",
-            "data": compute_scatter_matrix_data(df)[:72]
-        }
-
-    if mode == "image_summary":
-        treemap_all = compute_treemap_data(df)
-
-        def summary_sort_key(x):
-            val = x["normalized_impact"]
-            if val is not None:
-                return val
-            return -1
-
-        treemap_sorted = sorted(treemap_all, key=summary_sort_key, reverse=True)
-
-        return {
-            "chart_type": "visual summary",
-            "data_meaning": "Summary of main dashboard patterns",
-            "basic_rule": "Create a simple dashboard-style summary using the provided data samples.",
-            "bar_chart_data": compute_bar_data(df, selected_indicator),
-            "radar_chart_data": compute_radar_data(df),
-            "treemap_data_sample": treemap_sorted[:15]
         }
 
     return {}
@@ -1084,12 +1016,8 @@ def build_chart_prompt_with_llm(mode, chart_data):
         + "\n\nChart data:\n"
         + json.dumps(chart_data, ensure_ascii=False, indent=2)
         + "\n\nCreate a simple image-generation prompt.\n\n"
-        "Basic chart rules:\n"
-        "- Bar chart: use diet groups as categories and selected_impact_value as bar length.\n"
-        "- Treemap: use hierarchy Diet Group -> Age Group -> Impact Category. Use normalized_impact for rectangle size and colour.\n"
-        "- Radar chart: use nine environmental indicators as axes. Use relative_impact as radius. Use one polygon per diet group.\n"
-        "- Scatterplot matrix: use nine environmental indicators as variables. Each point represents Diet Group + Age Group + Sex.\n"
-        "- Visual summary: use the provided data samples to create a simple dashboard-style summary.\n\n"
+        "Basic chart rule:\n"
+        "- Bar chart: use diet groups as categories and selected_impact_value as bar length.\n\n"
         "Style: Clean dashboard style. White or light background. Readable labels. "
         "Similar to a Tableau dashboard panel. Do not invent data values."
     )
@@ -1234,7 +1162,7 @@ def ask_ai():
                 "image_base64": ""
             })
 
-        # 用户明确要求生成图时才进入这里
+        # 明确要求生成图时才进入这里
         chart_data = prepare_chart_data_for_image(df, mode, selected_indicator)
         prompt_info = build_chart_prompt_with_llm(mode, chart_data)
         image_prompt = prompt_info.get("image_prompt", "")
@@ -1260,4 +1188,3 @@ def ask_ai():
 if __name__ == "__main__":
     initialise_ai_data_memory()
     app.run(host="127.0.0.1", port=5000, debug=True, use_reloader=False)
-
